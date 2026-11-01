@@ -1,10 +1,10 @@
-# MTR Next 4to3 Car
+# MTR Next Test
 
 **在 YMTR 3.x（MTR 3.6.4.2 分支）里加载并渲染 MTR 4.0 格式的车包。**
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-green)](https://minecraft.net)
 [![Fabric](https://img.shields.io/badge/Loader-Fabric-blue)](https://fabricmc.net)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![License](https://img.shields.io/badge/License-ARR-red)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Work%20in%20Progress-orange)](#项目状态)
 
 ---
@@ -78,7 +78,7 @@ MTR 4.0 换了全新的车包格式（`.bbmodel` + `properties_*.json` + `defini
 
 1. 安装 Fabric Loader 与 Fabric API
 2. 安装 MTR（YMTR 3.6.4.2 分支）
-3. 把 `mtr-next-4to3-car-*.jar` 放进 `mods/`
+3. 把 `mtr-next-test-*.jar` 放进 `mods/`
 4. 启动游戏，把 4.0 车包放进 `resourcepacks/` 并启用
 
 ## 从源码构建
@@ -88,7 +88,7 @@ MTR 4.0 换了全新的车包格式（`.bbmodel` + `properties_*.json` + `defini
 set GRADLE_USER_HOME=C:\gradle-home
 gradlew.bat build
 
-# 产物：build/libs/mtr-next-4to3-car-<version>-1.20.1-fabric.jar
+# 产物：build/libs/mtr-next-test-<version>-1.20.1-fabric.jar
 ```
 
 ## 已知问题
@@ -104,4 +104,9 @@ gradlew.bat build
 
 ## 许可
 
-MIT
+**All Rights Reserved（保留所有权利）**
+
+未经版权所有者书面许可，不得复制、分发、修改或以任何形式使用。
+完整条款见 [LICENSE](LICENSE)。
+
+上游致谢与第三方许可见 LICENSE 文件。
