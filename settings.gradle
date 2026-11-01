@@ -18,4 +18,4 @@ pluginManagement {
 	}
 }
 
-rootProject.name = "mtr-next-4to3-car"
+rootProject.name = "mtr-next-test"

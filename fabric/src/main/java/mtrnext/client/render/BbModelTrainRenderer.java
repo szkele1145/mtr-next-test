@@ -396,6 +396,9 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 
 	private void renderLayer(ResourceManager manager, VehicleResource.ModelLayer layer,
 			float doorValue, boolean opening) {
+		// [0.71.1] 每次渲染一层时重置重复绘制计数（避免跨帧累积刷屏）
+		MTRNEXT$DUP_SEEN.clear();
+		MTRNEXT$DUP_COUNT = 0;
 		if (layer.modelResource == null || layer.modelResource.isEmpty()) {
 			diag("layer 无 modelResource（props-only 层）");
 			return; // props-only 层：只承载 gangway/barrier 参数，无几何
@@ -424,6 +427,12 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 		// 过滤规则与下方原循环的 continue 逐条对应 ⇒ 渲染输出逐字不变。
 		final LayerRenderCache plan =
 				LayerRenderCache.load(manager, layer.propertiesResource, layer.positionDefinitionsResource);
+
+		// [0.71.3] 本层 drawInstance 实际调用计数（区分「零调用」与「坐标出界」）
+		MTRNEXT$DRAW_COUNT = 0;
+		MTRNEXT$FLIPDBG_COUNT = 0;
+		final java.util.Set<String> printedLayers =
+				java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 		// ★ [0.48.0] 任务 2 诊断：每层一次性打印「锚点结构」。
 		//
@@ -459,7 +468,21 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 					continue;
 				}
 				for (final PositionDefinitions4xLoader.PositionGroup group : planPart.groups) {
-					for (final float[] p : group.positions) {
+				// [0.71.4] 正反贴图叠加排查：打印 positions / positionsFlipped 首个坐标。
+				// 独立计数器 MTRNEXT$FLIPDBG_COUNT（不与 drawInstance 的 DUP_COUNT 共用），
+				// 否则多 group 层里 DUP_COUNT 已被推过限，flipdbg 会静默不打印。
+				if (MTRNEXT$FLIPDBG_COUNT < 4) {
+					MTRNEXT$FLIPDBG_COUNT++;
+					final java.util.List<float[]> posList = group.positions;
+					final java.util.List<float[]> flipList = group.positionsFlipped;
+					float px0 = posList.isEmpty() ? Float.NaN : posList.get(0)[0];
+					float pz0 = posList.isEmpty() ? Float.NaN : posList.get(0)[2];
+					float fx0 = flipList.isEmpty() ? Float.NaN : flipList.get(0)[0];
+					float fz0 = flipList.isEmpty() ? Float.NaN : flipList.get(0)[2];
+					MtrNext.LOGGER.warn("[bbmodel][flipdbg] part={} names={} pos({})=[({},{})..] flip({})=[({},{})..] willDrawFlipAs(-{},π)",
+							info.type, info.names, posList.size(), px0, pz0, flipList.size(), fx0, fz0, fx0);
+				}
+				for (final float[] p : group.positions) {
 						drawInstance(anchor, vc, info, false, p[0], p[1], p[2], doorValue, opening, shouldRender, flashOn);
 					}
 					// 上游 PositionDefinitions: accept(-x, y, z, true) —— X 取反 + flipped
@@ -469,7 +492,18 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 				}
 			}
 		}
+
+		// [0.71.3] 本层 drawInstance 实际调用计数（每层只打印一次，不刷屏）
+		if (printedLayers.add(layer.treeCacheKey)) {
+			MtrNext.LOGGER.warn("[bbmodel][layer-draw] 层={} drewInstance={} plan.parts={} groupParts={} elements={}",
+					layer.treeCacheKey, MTRNEXT$DRAW_COUNT, plan.parts.size(),
+					tree.groupParts.size(), tree.elements.size());
+		}
+
 	}
+
+	/** [0.71.3] 本层 drawInstance 计数（renderLayer 入口清零） */
+	private static int MTRNEXT$DRAW_COUNT = 0;
 
 	/**
 	 * [0.48.0] 任务 2 诊断（每层只打印一次）：把「组名 → 锚点」的结构摊开。
@@ -600,6 +634,9 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 	private void drawInstance(ModelPart anchor, VertexConsumer vc, Properties4xLoader.PartInfo info,
 			boolean flipped, float px, float py, float pz, float doorValue, boolean opening,
 			boolean shouldRender, boolean flashOn) {
+		// [0.71.3] 本层 drawInstance 实际调用计数（区分「零调用」与「坐标出界」）
+		MTRNEXT$DRAW_COUNT++;
+
 		// [0.36.9] 门位移改写入**可复用缓冲区**（原先每次调用 new 一个 float[2]）
 		doorOffsetPixels(info, flipped, doorValue, opening);
 
@@ -630,6 +667,19 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 		final float z = shouldRender ? (pz + doorOffsetZ) : (float) Integer.MAX_VALUE;
 		final float y = flashOn ? py : (float) Integer.MAX_VALUE;
 
+		// [0.71.1] 「正反贴图叠加」诊断：同一 anchor 是否在同一帧内被重复绘制
+		// 到相近坐标（< 0.01 格）。命中即打印——一次/层限 8 条，不刷屏。
+		if (MTRNEXT$DUP_ENABLE) {
+			final int key = java.util.Objects.hash(System.identityHashCode(anchor),
+					Math.round(px), Math.round(pz));
+			if (!MTRNEXT$DUP_SEEN.add(key) && MTRNEXT$DUP_COUNT < 8) {
+				MTRNEXT$DUP_COUNT++;
+				MtrNext.LOGGER.warn("[bbmodel][dup] 同一 anchor 重复绘制到相近坐标：anchorHash={} flipped={} pos=({},{},{}) names={}",
+						System.identityHashCode(anchor), flipped, px, py, pz,
+						info == null ? "null" : info.names.toString());
+			}
+		}
+
 		anchor.x = x;
 		anchor.y = y;
 		anchor.z = z;
@@ -637,6 +687,16 @@ public final class BbModelTrainRenderer extends TrainRendererBase {
 		// x/y/z 每次 drawInstance 都重设 ⇒ 共享节点无残留（4.0 也是这么复用同一批 ModelPart）
 		anchor.render(matrices, vc, 0xF000F0, OverlayTexture.NO_OVERLAY);
 	}
+
+	/** [0.71.1] 重复绘制诊断开关（构建期写死 true，上线后可关） */
+	private static final boolean MTRNEXT$DUP_ENABLE = true;
+	/** [0.71.1] 本帧已见过的 (anchor, 位置) 键 */
+	private static final java.util.Set<Integer> MTRNEXT$DUP_SEEN =
+			java.util.concurrent.ConcurrentHashMap.newKeySet();
+	/** [0.71.1] 每次清空时机 = renderLayer 入口；条数上限防刷屏 */
+	private static int MTRNEXT$DUP_COUNT = 0;
+	/** [0.71.4] flipdbg 独立限流计数器（renderLayer 入口清零；不与 DUP_COUNT 共用） */
+	private static int MTRNEXT$FLIPDBG_COUNT = 0;
 
 	/**
 	 * 门位移（像素）：上游

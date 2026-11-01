@@ -1,15 +1,15 @@
 {
 	"schemaVersion": 1,
-	"id": "mtr-next-4to3-car",
+	"id": "mtr-next-test",
 	"version": "${version}",
-	"name": "MTR Next 4to3 Car",
-	"description": "MTR 4.x features on YMTR 3.x (MC 1.20.1): curve-exact rail preview, 4.0-format vehicle packs, custom formations with head-to-head couplings, bbmodel rendering, connection faces, and the complete BVE soundscape - every key of sound.cfg plays | 把 MTR 4.x 的轨道预览、4.0 车包、自定义编组、BVE 声景带回 YMTR 3.x",
+	"name": "MTR Next Test",
+	"description": "MTR Next test build - unstable, for testing only | MTR Next 测试构建 - 不稳定，仅供测试",
 	"authors": [
 		"szkele1145"
 	],
 	"contact": {
-		"homepage": "https://github.com/szkele1145/mtr-next-4to3-car",
-		"sources": "https://github.com/szkele1145/mtr-next-4to3-car"
+		"homepage": "https://github.com/szkele1145/mtr-next-test",
+		"sources": "https://github.com/szkele1145/mtr-next-test"
 	},
 	"license": "MIT",
 	"icon": "icon.png",
@@ -23,7 +23,7 @@
 		]
 	},
 	"mixins": [
-		"mtr-next-4to3-car.mixins.json"
+		"mtr-next-test.mixins.json"
 	],
 	"suggests": {
 		"mtr-turbo": "*",

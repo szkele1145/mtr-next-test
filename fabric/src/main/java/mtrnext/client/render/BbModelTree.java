@@ -55,7 +55,8 @@ public final class BbModelTree {
 	public final ModelPart root;
 	/** 顶层 outliner 组名 → 该组的锚点节点（上游 nameToPart 同义） */
 	public final Map<String, ModelPart> groupParts;
-	/** 顶层 outliner 组名，保持 bbmodel 顺序 */
+	/** [0.71.0] 元素名 → 元素自身节点（配置页面等旧逻辑用，不参与渲染锚点查找） */
+	public final Map<String, ModelPart> elementParts;
 	public final List<String> groupNames;
 	/**
 	 * [0.50.0] 顶层组名 → 从 mesh root 到组锚点的节点链（含两端）。
@@ -70,13 +71,14 @@ public final class BbModelTree {
 	public final List<Element> elements;
 
 	private BbModelTree(String modelId, int textureWidth, int textureHeight, ModelPart root,
-			Map<String, ModelPart> groupParts, List<String> groupNames, Map<String, List<ModelPart>> groupPaths,
+			Map<String, ModelPart> groupParts, Map<String, ModelPart> elementParts, List<String> groupNames, Map<String, List<ModelPart>> groupPaths,
 			List<Element> elements) {
 		this.modelId = modelId;
 		this.textureWidth = textureWidth;
 		this.textureHeight = textureHeight;
 		this.root = root;
 		this.groupParts = groupParts;
+		this.elementParts = elementParts;
 		this.groupNames = groupNames;
 		this.groupPaths = groupPaths;
 		this.elements = elements;
@@ -451,6 +453,7 @@ public final class BbModelTree {
 		final MeshDefinition mesh = new MeshDefinition();
 		final PartDefinition meshRoot = mesh.getRoot();
 		final Map<String, ModelPart> groupParts = new LinkedHashMap<>();
+		final Map<String, ModelPart> elementParts = new LinkedHashMap<>();
 		final List<String> groupNames = new ArrayList<>();
 		final List<Created> anchors = new ArrayList<>();
 		final List<ElementDraft> drafts = new ArrayList<>();
@@ -497,22 +500,20 @@ public final class BbModelTree {
 					chain.add(link);
 				}
 			}
-			// ★★ [0.43.1] 恢复「元素名 → 元素自身节点」映射（0.41.2 的改动）。
+			// ★★ [0.71.0] 组锚点与元素节点映射<b>分离</b>。
 			//
-			//   这是真机验证过的关键点：
-			//     0.41.2 有这条映射时 → 配置页面显示**正常**
-			//     0.41.7 撤销它之后    → 配置页面也**倒过来 / 错位**
+			//   0.43.1 曾把「元素名 → 元素自身节点」直接 put 进 groupParts，
+			//   覆盖同名的组锚点（当时为修配置页面显示，真机验证过）。
+			//   但上游 DynamicVehicleModel 的 nameToPart **只放组锚点**，
+			//   renderNormal 按组锚点整棵子树渲染；元素与组同名时（Blockbench 里很常见），
+			//   properties.names 命中的就从「整组」退化成「单个 cube」——
+			//   这正是「部件缺一大块 / 其余部件与它错位叠加」的系统性偏差。
 			//
-			//   原因：MC 的 ModelPart.render 会**递归渲染整棵子树**，
-			//   而 properties 里的 names 指向的是「组」；组锚点下面挂着该组
-			//   全部元素的子树，于是每次 drawInstance 都把整组画一遍，
-			//   外层又按「部件记录 × 位置实例」循环 ⇒ 几何被反复叠加/错位。
-			//
-			//   ⇒ 用元素自己的 cube 节点（只含 1 个 cube）覆盖同名组映射，
-			//     使一次 drawInstance 只画一个元素，符合 4.0 ModelPartExtension 的
-			//     元素级语义（javap + docs/_upstream/BlockbenchElement 已核对）。
+			//   ⇒ 元素名映射单独存 elementParts（配置页面等旧消费方查这张表），
+			//     groupParts 回归上游语义：只有组锚点，渲染用。
+			//   配置页面此前命中的就是元素节点，行为不变（仍查 elementParts）。
 			if (draft.name != null && !draft.name.isEmpty()) {
-				groupParts.put(draft.name, part);
+				elementParts.put(draft.name, part);
 			}
 			elements.add(new Element(draft.uuid, draft.name, draft.groupName, part, holder, chain,
 					draft.centerX, draft.centerY, draft.centerZ,
@@ -525,7 +526,7 @@ public final class BbModelTree {
 
 		MtrNext.LOGGER.debug("[bbmodel] {} 构建完成：{} 组 / {} 元素 / 纹理 {}x{}",
 				cacheKey, groupNames.size(), elements.size(), texW, texH);
-		return new BbModelTree(cacheKey, texW, texH, bakedRoot, groupParts, groupNames, groupPaths, elements);
+		return new BbModelTree(cacheKey, texW, texH, bakedRoot, groupParts, elementParts, groupNames, groupPaths, elements);
 	}
 
 	/** 元素在 bake 前的暂存信息（bake 后才能拿到 ModelPart） */
@@ -601,12 +602,24 @@ public final class BbModelTree {
 	private static void addGroup(JsonObject group, JsonObject previousSibling, GroupChain parentChain,
 			Created anchor, String topGroupName, Map<String, JsonObject> uuidToElement,
 			Names names, List<ElementDraft> drafts, float modelYOffset, int depth) {
+		final String gname = str(group, "name", "?");
+		if (depth <= 1 || gname.contains("hand") || gname.contains("door") || gname.contains("men")) {
+			final JsonArray o = arr(group, "origin");
+			MtrNext.LOGGER.info("[bbmodel][diag] group depth={} name={} origin=[{} {} {}] prevSibling={} parentChain.len={}", depth, gname, f(o,0),f(o,1),f(o,2), previousSibling==null?"null":str(previousSibling,"name","?"), parentChain.links.size());
+		}
 		if (depth > 64) {
 			MtrNext.LOGGER.warn("[bbmodel] outliner 嵌套过深，跳过组 {}", str(group, "name", "?"));
 			return;
 		}
 
 		final GroupChain chain = outlineAdd(parentChain, previousSibling, group);
+		if (depth <= 1 || gname.contains("hand") || gname.contains("door") || gname.contains("men")) {
+			MtrNext.LOGGER.info("[bbmodel][diag] group {} -> chain.len={} (after outlineAdd)", gname, chain.links.size());
+			if (!chain.links.isEmpty()) {
+				final GroupTransformation last = chain.links.get(chain.links.size()-1);
+				MtrNext.LOGGER.info("[bbmodel][diag]   last link pivot=[{} {} {}] rot=[{} {} {}]", last.pivotX,last.pivotY,last.pivotZ, last.rotateX,last.rotateY,last.rotateZ);
+			}
+		}
 
 		// 注意：这里<b>不为组本身建节点</b>。上游 iterateChildren 只累积
 		// GroupTransformations 链，真正的 ModelPart 由每个元素调用
@@ -614,33 +627,30 @@ public final class BbModelTree {
 		// （groupTransformations + 元素自身 origin/rotation → create()）。
 		// 若在此处建节点再把 anchor 换成它，嵌套组会把父链重复应用一次。
 		if (group.has("children") && group.get("children").isJsonArray()) {
-			// ★★★ [0.64.0] 严格复刻上游 iterateChildren 的 previous 传递 ★★★
-			//
-			//   上游原文：
-			//     for (int i = 0; i < blockbenchOutline.getChildren().size(); i++) {
-			//         iterateChildren(blockbenchOutline.getChildren().get(i),
-			//                 i == 0 ? previousBlockbenchOutline
-			//                        : blockbenchOutline.getChildren().get(i - 1), ...);
-			//     }
-			//
-			//   ① {@code getChildren()} 只含<b>组</b>，元素 uuid 在该列表之外；
-			//      所以 previous 只在「组」之间轮转，元素不参与。
-			//   ② 第一个子组继承的是<b>本组自己的 previousSibling</b>，不是本组。
-			//   ③ 第二个及之后的子组用「前一个子组」。
-			JsonObject lastChildGroup = null;
+			// ★★★ 严格对齐上游字节码（javap）★★★
+			// 上游 iterateChildren:
+			//   1) newGroupTransformations = outline.add(groupTransformations, previousBlockbenchOutline, id)
+			//   2) childrenUuid.forEach(uuid -> consumer.accept(uuid, newGroupTransformations))
+			//   3) getChildren().forEach(cg -> iterateChildren(cg, blockbenchOutline, id, groupTransformations, consumer))
+			//    → previous = 当前 outline（父组）
+			//    → GT = 入参 groupTransformations（不含当前组）
+			//    → 元素用 newGroupTransformations（含当前组）
+			final JsonObject currentGroup = group;
 			for (final JsonElement child : group.getAsJsonArray("children")) {
 				if (child.isJsonPrimitive()) {
-					// 上游用 uuidToElement.remove(uuid)：同一元素被多处引用时只处理一次
 					final JsonObject element = uuidToElement.remove(child.getAsString());
 					if (element != null) {
 						addElement(element, chain, anchor, topGroupName, names, drafts, modelYOffset);
 					}
 				} else if (child.isJsonObject()) {
 					final JsonObject childGroup = child.getAsJsonObject();
-					final JsonObject prev = lastChildGroup == null ? previousSibling : lastChildGroup;
-					addGroup(childGroup, prev, chain, anchor, topGroupName,
+					// 字节码确认：递归传 (child, 当前组, 含当前组的新链)
+					// 上游 iterateChildren 步骤 3：递归传入原 groupTransformations，
+					// 但其 outline.add 内部会用 previousOutline（父组）计算相对差值。
+					// 我们的 outlineAdd 已把「相对前一个兄弟」逻辑封装在 append 里，
+					// 所以子组必须基于「已含父组的 chain」继续 append，否则会丢失父组变换。
+					addGroup(childGroup, currentGroup, chain, anchor, topGroupName,
 							uuidToElement, names, drafts, modelYOffset, depth + 1);
-					lastChildGroup = childGroup;
 				}
 			}
 		}
@@ -727,6 +737,18 @@ public final class BbModelTree {
 						.addBox(cubeName, x, y, z, sizeX, sizeY, sizeZ,
 								new CubeDeformation(inflate), u, v),
 				PartPose.ZERO);
+		if (topGroupName.contains("hand") || str(element,"name","").contains("hand") || topGroupName.contains("men") || topGroupName.contains("door")) {
+			StringBuilder sb = new StringBuilder();
+			sb.append("[bbmodel][diag] elem in ").append(topGroupName).append(" name=").append(str(element,"name","")).append(" uuid=").append(str(element,"uuid","")).append('\n');
+			sb.append("  el.origin=[").append(f(origin,0)).append(',').append(f(origin,1)).append(',').append(f(origin,2)).append("] el.rot=[").append(f(rotation,0)).append(',').append(f(rotation,1)).append(',').append(f(rotation,2)).append("]\n");
+			sb.append("  cube(x,y,z)=[").append(x).append(',').append(y).append(',').append(z).append("] size=[").append(sizeX).append(',').append(sizeY).append(',').append(sizeZ).append("] inflate=").append(inflate).append(" uv=[").append(u).append(',').append(v).append("]\n");
+			sb.append("  modelYOffset=").append(modelYOffset).append(" chainLinks=").append(chain.links.size()).append(" holderLinkNames=").append(holder.linkNames).append('\n');
+			for(int li=0; li<chain.links.size(); li++){
+				GroupTransformation gt = chain.links.get(li);
+				sb.append(String.format("    L%02d pivot=[%.3f,%.3f,%.3f] rot=[%.4f,%.4f,%.4f]\n", li, gt.pivotX,gt.pivotY,gt.pivotZ, gt.rotateX,gt.rotateY,gt.rotateZ));
+			}
+			MtrNext.LOGGER.info(sb.toString());
+		}
 
 		// MC 坐标：X/Y 取负（上游同约定），Z 保持。
 		// 盒中心 = 盒原点 + 尺寸/2（单位像素），再换算成格。
@@ -888,7 +910,7 @@ public final class BbModelTree {
 
 	private static BbModelTree empty(String cacheKey) {
 		final ModelPart root = LayerDefinition.create(new MeshDefinition(), 16, 16).bakeRoot();
-		return new BbModelTree(cacheKey, 16, 16, root, Map.of(), List.of(), Map.of(), List.of());
+		return new BbModelTree(cacheKey, 16, 16, root, Map.of(), Map.of(), List.of(), Map.of(), List.of());
 	}
 
 	private static final JsonArray EMPTY_ARRAY = new JsonArray();

@@ -7,7 +7,7 @@ version = project.mod_version
 group = project.maven_group
 
 base {
-	archivesName = "mtr-next-4to3-car-${project.mod_version}-1.20.1-fabric"
+	archivesName = "mtr-next-test-${project.mod_version}-1.20.1-fabric"
 }
 
 repositories {
@@ -41,16 +41,16 @@ dependencies {
 
 loom {
 	mixin {
-		defaultRefmapName = "mtr-next-4to3-car.refmap.json"
+		defaultRefmapName = "mtr-next-test.refmap.json"
 	}
 }
 
-// 产物命名规范（继承 mtr-turbo 纪律）：mtr-next-<modver>-<mcver>-<loader>.jar
+// 产物命名规范：mtr-next-test-<build号>-<mcver>-<loader>.jar
 tasks.named('remapJar') {
-	archiveFileName = "mtr-next-4to3-car-${project.mod_version}-1.20.1-fabric.jar"
+	archiveFileName = "mtr-next-test-${project.mod_version}-1.20.1-fabric.jar"
 }
 tasks.named('jar') {
-	archiveFileName = "mtr-next-4to3-car-${project.mod_version}-1.20.1-fabric-dev.jar"
+	archiveFileName = "mtr-next-test-${project.mod_version}-1.20.1-fabric-dev.jar"
 }
 
 processResources {
